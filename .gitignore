@@ -1,0 +1,11 @@
+# Local working files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+
+# Real values live in a private overlay, never here
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
