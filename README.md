@@ -1,8 +1,8 @@
 # opentofu
 
-OpenTofu configuration that creates the fleet's VMs on Proxmox by cloning the cloud-init template the `ansible` repo builds. It replaces the manual `qm clone`, `qm set` and `qm start` steps in [Provisioning a VM](https://myah-mitchell.github.io/docs/fleet-bootstrap/procedures/provision-a-vm/).
+OpenTofu configuration that creates the fleet's VMs on Proxmox by cloning the cloud-init template the `ansible` repo builds. It is the first stage of the ansible repo's `site.yml`, which builds a host in one run. See [How a host is built](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/how-a-host-is-built/).
 
-Cloud-init still provisions each VM on first boot through the template's vendor snippet, so nothing here needs to hand off to Ansible. The Komodo onboarding key remains a manual step.
+What a clone does on first boot depends on the template's vendor snippet, which the ansible repo's `pve` role writes. In `minimal` mode it starts the guest agent and creates the `ansible` login, and `site.yml` provisions the VM over SSH and passes it the Komodo onboarding key. In `provision` mode the clone provisions itself, and the onboarding key is a step by hand.
 
 ## Layout
 
@@ -24,7 +24,7 @@ Everything sensitive arrives as environment variables:
 | `PROXMOX_VE_API_TOKEN` | The token for a server missing from that map. Only one server can use it, since two servers never share a token |
 | `PROXMOX_VE_ENDPOINT` | The API URL for a server whose `endpoint` is null |
 | `PROXMOX_VE_INSECURE` | `true` only while the API certificate is not yet trusted, for a server whose `insecure` is null |
-| `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see [Semaphore setup](https://myah-mitchell.github.io/docs/fleet-bootstrap/hosts/ci01/semaphore/)), reachable only from Semaphore's container |
+| `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see [The state database](https://myah-mitchell.github.io/docs/fleet-bootstrap/foundation/handover/#state-database)), on a network that does not leave ci01 |
 | `TF_ENCRYPTION` | State and plan encryption config (see below) |
 
 `TF_ENCRYPTION` holds the key provider and method:
@@ -51,7 +51,7 @@ The path assumes `fleet-private` is checked out next to this repo.
 
 `prevent_destroy` is set on the VM resource. Removing a VM means editing `modules/vm/main.tf` on purpose.
 
-Existing VMs are not imported. Only new VMs are managed here, so a plan cannot touch a running host.
+Nothing here imports an existing VM. A VM made by hand stays out of the state, so a plan cannot touch it. To bring such a host under OpenTofu, rebuild it from a tfvars entry. See [Rebuilding a VM](https://myah-mitchell.github.io/docs/fleet-bootstrap/procedures/rebuild-a-vm/).
 
 ## Servers and clusters
 
@@ -119,7 +119,7 @@ VM.GuestAgent.Audit VM.Migrate VM.PowerMgmt
 
 ## Apply returns before provisioning finishes
 
-`tofu apply` completes once the guest agent reports an address. The agent starts early in first boot, so apply can finish while cloud-init and the Ansible provisioning are still running, by a few minutes in the first test. Do not chain a follow-up job on apply completing. Wait for `cloud-init status --wait` on the host first.
+`tofu apply` completes once the guest agent reports an address. The agent starts early in first boot, so apply can finish while cloud-init and the Ansible provisioning are still running, by a few minutes in the first test. Do not chain a follow-up job on apply completing. Wait for `cloud-init status --wait` on the host first. `site.yml` does this in its wait stage.
 
 That command exits 2, not 0, when cloud-init finishes as `degraded done`. Clones currently do this: Proxmox generates the user-data with a `user:` key that cloud-init has deprecated (removal is scheduled for 27.2), and cloud-init reports it as a recoverable error. Treat exit codes 0 and 2 as success and 1 as failure. `errors: []` in `cloud-init status --long` means nothing actually failed.
 
