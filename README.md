@@ -1,6 +1,6 @@
 # opentofu
 
-OpenTofu configuration that creates the fleet's VMs on Proxmox by cloning the cloud-init template the `ansible` repo builds. It replaces the manual `qm clone`, `qm set` and `qm start` steps in `docker-stacks/docs/provision-a-vm.md`.
+OpenTofu configuration that creates the fleet's VMs on Proxmox by cloning the cloud-init template the `ansible` repo builds. It replaces the manual `qm clone`, `qm set` and `qm start` steps in [Provisioning a VM](https://myah-mitchell.github.io/docs/fleet-bootstrap/procedures/provision-a-vm/).
 
 Cloud-init still provisions each VM on first boot through the template's vendor snippet, so nothing here needs to hand off to Ansible. The Komodo onboarding key remains a manual step.
 
@@ -24,7 +24,7 @@ Everything sensitive arrives as environment variables:
 | `PROXMOX_VE_API_TOKEN` | The token for a server missing from that map. Only one server can use it, since two servers never share a token |
 | `PROXMOX_VE_ENDPOINT` | The API URL for a server whose `endpoint` is null |
 | `PROXMOX_VE_INSECURE` | `true` only while the API certificate is not yet trusted, for a server whose `insecure` is null |
-| `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see `docker-stacks/docs/semaphore-setup.md`), reachable only from Semaphore's container |
+| `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see [Semaphore setup](https://myah-mitchell.github.io/docs/fleet-bootstrap/hosts/ci01/semaphore/)), reachable only from Semaphore's container |
 | `TF_ENCRYPTION` | State and plan encryption config (see below) |
 
 `TF_ENCRYPTION` holds the key provider and method:
