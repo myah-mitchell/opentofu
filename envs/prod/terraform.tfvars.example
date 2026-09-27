@@ -1,0 +1,60 @@
+# The reference for this environment's variables file. Copy it to the private
+# repo as opentofu/prod.tfvars, which the ansible vms role reads, and fill in
+# real values. variables.tf lists every key and its default.
+#
+# Addresses below are from the documentation range (RFC 5737), not real hosts.
+# API tokens do not go here. Set TF_VAR_server_api_tokens to a JSON object keyed
+# like servers, or PROXMOX_VE_API_TOKEN when there is only one server.
+
+servers = {
+  # A standalone node. insecure skips the certificate check, only while the
+  # API certificate is self-signed.
+  pve01 = {
+    endpoint       = "https://192.0.2.2:8006/"
+    insecure       = true
+    template_node  = "pve01"
+    template_vm_id = 2604001
+  }
+
+  # A cluster, reached through its first node, which holds the template.
+  # template_node must be the node the ansible pve role builds the template on:
+  # the cluster's first PVE host in the inventory. The VMID follows the pve
+  # role's pve_template_ubuntu_version, 26.04 giving 2604001.
+  lab = {
+    endpoint       = "https://192.0.2.3:8006/"
+    template_node  = "pve02"
+    template_vm_id = 2604001
+  }
+}
+
+# Keyed by the Ansible host's serverHostname in lower case. ipv4_address, less
+# the prefix, must match the host's ansible_host; site.yml stops if it does not.
+vms = {
+  # A standalone server has one node, so there is nothing to pin.
+  example01 = {
+    server       = "pve01"
+    cores        = 2
+    memory_mb    = 4096
+    vlan_id      = 7
+    ipv4_address = "192.0.2.10/24"
+    ipv4_gateway = "192.0.2.1"
+    dns_servers  = ["192.0.2.1"]
+    tags         = ["docker"]
+
+    # scsi2 is the persistent disk the ansible docker role mounts at
+    # /srv/persist.
+    extra_disks = {
+      persist = { interface = "scsi2", size_gb = 100 }
+    }
+  }
+
+  # Pinned: cloned on pve02, migrated to pve03, and moved back there if it
+  # is ever moved. Without node_name it would be created on pve02 and then
+  # left wherever it runs.
+  example02 = {
+    server       = "lab"
+    node_name    = "pve03"
+    ipv4_address = "192.0.2.11/24"
+    ipv4_gateway = "192.0.2.1"
+  }
+}

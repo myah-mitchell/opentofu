@@ -18,6 +18,15 @@ variable "template_vm_id" {
   type        = number
 }
 
+variable "template_node_name" {
+  description = <<-EOT
+    Node the template lives on. Null means node_name. On another node of the
+    same cluster, the clone is made there and migrated to node_name.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "vm_id" {
   description = "VMID for the new VM. Null lets Proxmox pick the next free one."
   type        = number
