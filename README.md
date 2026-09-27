@@ -132,3 +132,7 @@ A `BrokenPipeError` traceback from `cloud-init` in the console at the end of fir
 - A clone migrated to another node of a cluster, and the privileges that needs.
 - A pinned VM moved back after a manual migration, and an unpinned one left where it was. The provider's source finds a moved VM on its new node when it refreshes, and the plan was tested against a mocked VM list, but neither has run against a real cluster.
 - An existing state from before `servers`: its VMs were created under the old single provider. OpenTofu should move them to the new one on the next plan, as long as they stay in the input, but this has not been tried.
+
+## License
+
+Copyright (C) 2026 Myah Mitchell. Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE). You can use, modify, and share this code, but any modified version you distribute or offer over a network must be released under the same license with this notice kept.
