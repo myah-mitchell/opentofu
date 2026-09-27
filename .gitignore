@@ -5,7 +5,7 @@
 crash.log
 *.tfplan
 
-# Real values live in a private overlay, never here
+# Real values live in the private repo (fleet-private), never here
 *.tfvars
 *.tfvars.json
 !*.tfvars.example

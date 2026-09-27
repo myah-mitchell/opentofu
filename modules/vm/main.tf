@@ -17,9 +17,13 @@ resource "proxmox_virtual_environment_vm" "this" {
   tags    = sort(distinct(concat(var.template_tags, ["tofu"], var.tags)))
   started = var.started
   on_boot = var.on_boot
+  # A changed node_name migrates the VM within its cluster rather than
+  # replacing it, which prevent_destroy would refuse anyway.
+  migrate = true
 
   clone {
     vm_id        = var.template_vm_id
+    node_name    = var.template_node_name
     datastore_id = var.datastore_id
     full         = true
   }
@@ -83,7 +87,12 @@ resource "proxmox_virtual_environment_vm" "this" {
 
   # Destroying a fleet VM has to be a deliberate edit of this file, not a
   # side effect of a plan.
+  #
+  # The clone source only matters when the VM is created. Without the
+  # ignore_changes, a newer template VMID or a different template node would
+  # plan to replace every VM.
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [clone]
   }
 }

@@ -8,11 +8,11 @@ Cloud-init still provisions each VM on first boot through the template's vendor 
 
 ```
 modules/vm/           one VM: clone, cores/memory, VLAN, static IP, extra disks
-envs/homelab/         the environment: provider, backend, encryption, VM map
+envs/prod/         the environment: providers, backend, encryption, VM map
   terraform.tfvars.example
 ```
 
-Real values (node name, datastore, IPs, VLANs) go in `terraform.tfvars` in a private overlay, the same pattern as `ansible-private`. `*.tfvars` is git-ignored here. No secret belongs in this repo or in the tfvars.
+Real values (servers, node names, IPs, VLANs) go in a tfvars file in the private repo, at `opentofu/prod.tfvars` in `fleet-private`, next to the Ansible inventory. `*.tfvars` is git-ignored here. No secret belongs in this repo or in the tfvars.
 
 ## Runtime configuration
 
@@ -20,9 +20,10 @@ Everything sensitive arrives as environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `PROXMOX_VE_ENDPOINT` | Proxmox API URL |
-| `PROXMOX_VE_API_TOKEN` | `user@realm!tokenid=secret`, a scoped token, not `root@pam` |
-| `PROXMOX_VE_INSECURE` | `true` only while the API certificate is not yet trusted |
+| `TF_VAR_server_api_tokens` | JSON map of API tokens, one per server in `servers`, each `user@realm!tokenid=secret`: a scoped token, not `root@pam` |
+| `PROXMOX_VE_API_TOKEN` | The token for a server missing from that map. Only one server can use it, since two servers never share a token |
+| `PROXMOX_VE_ENDPOINT` | The API URL for a server whose `endpoint` is null |
+| `PROXMOX_VE_INSECURE` | `true` only while the API certificate is not yet trusted, for a server whose `insecure` is null |
 | `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see `docker-stacks/docs/semaphore-setup.md`), reachable only from Semaphore's container |
 | `TF_ENCRYPTION` | State and plan encryption config (see below) |
 
@@ -40,15 +41,38 @@ The code marks state and plan encryption as `enforced`, so OpenTofu refuses to r
 ## Usage
 
 ```
-cd envs/homelab
+cd envs/prod
 tofu init
-tofu plan  -var-file=terraform.tfvars
-tofu apply -var-file=terraform.tfvars
+tofu plan  -var-file=../../../fleet-private/opentofu/prod.tfvars
+tofu apply -var-file=../../../fleet-private/opentofu/prod.tfvars
 ```
+
+The path assumes `fleet-private` is checked out next to this repo.
 
 `prevent_destroy` is set on the VM resource. Removing a VM means editing `modules/vm/main.tf` on purpose.
 
 Existing VMs are not imported. Only new VMs are managed here, so a plan cannot touch a running host.
+
+## Servers and clusters
+
+`servers` lists every Proxmox API the VMs live behind, and each gets its own provider (provider `for_each`, new in OpenTofu 1.9). A standalone node is a server of its own. A cluster is one server, reached through any node. Each VM names its `server`, and optionally a `node_name`:
+
+- With `node_name`, the VM is pinned. It is created there, and a VM moved elsewhere in Proxmox is migrated back by the next apply that includes it.
+- Without it, a new VM is created on the server's `template_node`, and after that it is left wherever it runs. A data source lists the VMs tagged `tofu` on each server, and the VM's current node is used as its `node_name`, so moving it in Proxmox, or HA doing so, causes no change.
+
+A cluster has one cloud-init template, on its `template_node`. A pinned VM for another node is cloned there and migrated, which the provider does itself when the storage is not shared. The vendor snippet has to be on every node, since each node reads it from its own `local` storage; the ansible repo's `pve` role puts it there. The clone source only matters at creation, so the module ignores later changes to it, and a new template VMID never plans a replacement.
+
+Every plan reads each server's VM list, so it needs the API even when nothing changes, and the token needs `VM.Audit` on the VMs (the role below has it). A node that is down is left out of the list with a warning, and an unpinned VM on it is then planned back onto the template node. That apply fails while the node is down, and a run against that VM would fail anyway.
+
+Removing a server from `servers` while its VMs are still in the state leaves them without a provider, and the plan fails. Moving a VM to another server is a new VM, which `prevent_destroy` refuses.
+
+## Driven from Ansible
+
+The ansible repo's `site.yml` runs this configuration through its `vms` role. It checks this repo out, copies the private repo's `opentofu/prod.tfvars` in as `envs/prod/private.auto.tfvars`, and applies with `-target` for the hosts in that run only, each matched to a VM by its `serverHostname` in lower case. A host with no VM in the file matches nothing. Every other VM is still in the input, so the plan leaves it alone, and the role refuses any plan that would destroy something. The tokens and the other environment variables are read from the `ansible-playbook` process. The role's `vms_backend: local` swaps in a local state file for trying it away from Semaphore.
+
+The `vms` output lists every VM in the input, created or not, with its server, node, VMID and bare IPv4 address. The role uses it to tell a VM from a host built by hand, and checks the address against the host's `ansible_host`.
+
+Running `tofu` by hand and running `site.yml` against the same state both work, as long as both use the same tfvars. A VM that is in the state but missing from the input is a VM the plan wants to destroy, which `prevent_destroy` stops.
 
 ## Verified
 
@@ -74,7 +98,7 @@ Differences from the template that the module sets on purpose (all overridable p
 | Start on node boot | off | on | `on_boot` |
 | Tags | `26.04;cloudinit;ubuntu` | template tags, `tofu`, and the ones you pass | `template_tags`, `tags` |
 
-Also confirmed on that clone: a second `tofu plan` reports no changes, so the inherited disks cause no drift, and cloud-init reached `status: done`.
+Also confirmed on that clone: a second `tofu plan` reports no changes, so the inherited disks cause no drift, and cloud-init reached `status: done`. A later apply on the same clone merged its tags as the table shows.
 
 `template_tags` is a plain variable, not read from the template. If the template's tags change, update it to match.
 
@@ -86,8 +110,10 @@ A second clone (`example02`) was created with a privilege-separated token that h
 Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit VM.Allocate VM.Audit
 VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk
 VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options
-VM.GuestAgent.Audit VM.PowerMgmt
+VM.GuestAgent.Audit VM.Migrate VM.PowerMgmt
 ```
+
+`VM.Migrate` was added afterwards for clones placed on a node other than the template's, and is untested. Each standalone server and each cluster needs its own user, role and token.
 
 `VM.GuestAgent.Audit` is required on current Proxmox versions to read the guest agent (the old `VM.Monitor` no longer exists). The token can still act on every VM under `/vms`. A tighter setup puts managed VMs in a pool and grants on `/pool/<name>`, which needs a `pool_id` in the module.
 
@@ -101,6 +127,8 @@ A `BrokenPipeError` traceback from `cloud-init` in the console at the end of fir
 
 ## Not yet verified
 
-- The tag merge against a real node.
 - The `pg` backend end to end, and a real run of `tofu` from inside Semaphore (its image ships 1.9.0, and this configuration validates and plans on it).
-- The `pg` backend end to end, and a real run of `tofu` from inside Semaphore (its image ships 1.9.0, and this configuration validates and plans on it).
+- A real apply through the ansible repo's `vms` role. Its check-mode plan was tested offline with OpenTofu 1.9.0 and a local backend, including a two-node cluster and a standalone server.
+- A clone migrated to another node of a cluster, and the privileges that needs.
+- A pinned VM moved back after a manual migration, and an unpinned one left where it was. The provider's source finds a moved VM on its new node when it refreshes, and the plan was tested against a mocked VM list, but neither has run against a real cluster.
+- An existing state from before `servers`: its VMs were created under the old single provider. OpenTofu should move them to the new one on the next plan, as long as they stay in the input, but this has not been tried.

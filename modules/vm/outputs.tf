@@ -12,3 +12,8 @@ output "ipv4_address" {
   description = "Address the VM was given, without the prefix length."
   value       = split("/", var.ipv4_address)[0]
 }
+
+output "node_name" {
+  description = "Node the VM runs on."
+  value       = proxmox_virtual_environment_vm.this.node_name
+}
